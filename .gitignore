@@ -1,1 +1,5 @@
 __pycache__/
+pypi_command
+build/
+dist/
+omq.egg-info/
