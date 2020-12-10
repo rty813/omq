@@ -16,14 +16,19 @@ class Socket:
         self.s_sub.connect(f'tcp://{self.host}:{self.port}')
 
         self.on_message = None
+        self.stop = False
 
     def _recv(self):
-        while True:
-            topic, msg = self.s_sub.recv_multipart()
-            msg = pickle.loads(msg)
-            topic = topic.decode()
-            if self.on_message:
-                self.on_message(topic, msg)
+        import time
+        while not self.stop:
+            try:
+                topic, msg = self.s_sub.recv_multipart()
+                msg = pickle.loads(msg)
+                topic = topic.decode()
+                if self.on_message:
+                    self.on_message(topic, msg)
+            except:
+                time.sleep(0.1)
 
     def publish(self, topic, msg):
         topic = topic.encode() if isinstance(topic, str) else topic
@@ -52,8 +57,9 @@ class Socket:
         self._recv()
 
     def close(self):
-        self.s_sub.quit()
-        self.s_req.quit()
+        self.stop = True
+        self.s_sub.close()
+        self.s_req.close()
         self.context.term()
 
 class Broker:
