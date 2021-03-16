@@ -1,3 +1,8 @@
+""" Omq为一个进程间通信模块，基于Nanomsg开发
+
+Omq封装了两种使用模式，一种为总线模式，另一种为问答模式，分别对应Bus类和Req、Rep类。
+使用时，应按需使用不同的模式。
+"""
 import pickle
 import threading
 
@@ -38,9 +43,6 @@ class Bus:
         return self
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
-        self._node.close()
-
-    def __del__(self):
         self._node.close()
 
     def publish(self, topic: str, payload):
@@ -105,9 +107,6 @@ class Req:
         self._node = nnpy.Socket(nnpy.AF_SP, nnpy.REQ)
         self._node.connect(f'tcp://{target_ip}:{target_port}')
 
-    def __del__(self):
-        self._node.close()
-
     def __enter__(self):
         return self
 
@@ -142,9 +141,6 @@ class Rep:
         self._handler = handler
         self._node = nnpy.Socket(nnpy.AF_SP, nnpy.REP)
         self._node.bind(f'tcp://127.0.0.1:{port}')
-
-    def __del__(self):
-        self._node.close()
 
     def __enter__(self):
         return self
