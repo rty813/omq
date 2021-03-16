@@ -28,7 +28,7 @@ Omq requires python 3.6+
 Omq implements Broker and Socket. Before publish and subscribe, you need to start a broker at first.
 
 
-### Basic
+### Bus
 
 ```python
 # node1.py
@@ -50,4 +50,28 @@ with omq.Bus() as node:
     node.on_message = on_message
     node.subscribe(['test', 'test/#'])
     node.loop_forever()
+```
+
+### REQ/REP
+```python
+# rep.py
+import omq
+
+def handler(data):
+    print(data)
+    # Handle data...
+    return 'ok'
+
+with omq.Rep(5000, handler) as node:
+    node.loop_forever()
+```
+
+```python
+# req.py
+import omq
+
+with omq.Req(5000) as node:
+    data = 'req data'
+    res = node.req(data)
+    print(res)  # ok
 ```
