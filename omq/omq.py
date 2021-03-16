@@ -1,86 +1,178 @@
-import zmq
+import nnpy
 import pickle
 import threading
 
+class Bus:
+    """ 总线类
 
-class Socket:
-    def __init__(self, host='localhost', port=5555) -> None:
-        self.host = host
-        self.port = port
-        self.context = zmq.Context()
-        self.s_req = self.context.socket(zmq.REQ)
-        self.s_req.setsockopt(zmq.RCVTIMEO, 50)
-        self.s_sub = self.context.socket(zmq.SUB)
+    通过该类，可以将消息发送至总线上，其他所有同一总线的节点都能收到消息，也可以订阅指定消息
 
-        self.s_req.connect(f'tcp://{self.host}:{self.port+1}')
-        self.s_sub.connect(f'tcp://{self.host}:{self.port}')
-
+    Attributes:
+        on_message: 收到消息时的回调函数
+    """
+    def __init__(self, nano: bool = False, base_port: int = 50000):
         self.on_message = None
-        self.stop = False
+        self._topics = list()
 
-    def _recv(self):
-        import time
-        while not self.stop:
+        self._node = nnpy.Socket(nnpy.AF_SP, nnpy.BUS)
+        port: int = base_port
+        for port in range(base_port, 65535):
             try:
-                topic, msg = self.s_sub.recv_multipart()
-                msg = pickle.loads(msg)
-                topic = topic.decode()
-                if self.on_message:
-                    self.on_message(topic, msg)
-            except:
-                time.sleep(0.1)
+                self._node.bind(f'tcp://127.0.0.1:{port}')
+                break
+            except nnpy.errors.NNError:
+                # 端口已被占用
+                pass
 
-    def publish(self, topic, msg):
-        topic = topic.encode() if isinstance(topic, str) else topic
-        try:
-            self.s_req.send_multipart([topic, pickle.dumps(msg)])
-            self.s_req.recv()
-        except Exception as e:
-            self.s_req.close()
-            self.s_req = self.context.socket(zmq.REQ)
-            self.s_req.setsockopt(zmq.RCVTIMEO, 50)
-            self.s_req.connect(f'tcp://{self.host}:{self.port+1}')
-            raise e
+        for target_port in range(base_port, port):
+            self._node.connect(f'tcp://127.0.0.1:{target_port}')
 
-    def subscribe(self, topic):
-        topic = topic.encode() if isinstance(topic, str) else topic
-        self.s_sub.setsockopt(zmq.SUBSCRIBE, topic)
+        if nano is False:
+            # 连接Nano
+            self._node.connect('tcp://192.168.3.112:50000')
 
-    def unsubscribe(self, topic):
-        topic = topic.encode() if isinstance(topic, str) else topic
-        self.s_sub.setsockopt(zmq.UNSUBSCRIBE, topic)
 
-    def loop_start(self):
-        threading.Thread(target=self._recv).start()
+    def __enter__(self):
+        return self
 
-    def loop_forever(self):
-        self._recv()
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        self._node.close()
+
+
+    def publish(self, topic: str, payload):
+        """ 发送一条消息到总线上
+
+        Args:
+            topic: 消息主题
+            payload: 消息内容，可以为任意Python内建类型
+        """
+        topic = topic.encode()
+        self._node.send(topic + b';' + pickle.dumps(payload))
+
+
+    def subscribe(self, topics: list):
+        """ 订阅消息主题
+
+        Args:
+            topics: 消息主题列表，可以使用通配符#
+        """
+        self._topics = topics
+
 
     def close(self):
-        self.stop = True
-        self.s_sub.close()
-        self.s_req.close()
-        self.context.term()
+        """ 关闭节点"""
+        self._node.close()
 
-class Broker:
-    def __init__(self, port=5555) -> None:
-        threading.Thread(target=self._start, args=(port,)).start()
 
-    def _start(self, port):
-        context = zmq.Context()
-        socket = context.socket(zmq.PUB)
-        socket.bind(f"tcp://*:{port}")
+    def loop_start(self):
+        """ 开始接收消息，非阻塞式 """
+        threading.Thread(target=self._main_thread).start()
 
-        socket_r = context.socket(zmq.REP)
-        # socket_r.setsockopt(zmq.RCVTIMEO, 10)
-        socket_r.bind(f'tcp://*:{port+1}')
 
+    def loop_forever(self):
+        """ 开始接受消息，阻塞式 """
+        self._main_thread()
+
+
+    def _main_thread(self):
         while True:
             try:
-                message = socket_r.recv_multipart()
-                print(message)
-                socket_r.send_string('ok')
-                socket.send_multipart(message)
-            except:
-                # print(2)
-                pass
+                data = self._node.recv().split(b';')
+                topic = data[0].decode()
+                payload = pickle.loads(data[1])
+
+                for t in self._topics:
+                    if t.endswith('/#'):  # 通配符匹配
+                        if topic.startswith(t[:-2]) and topic != t:
+                            break
+                    elif topic == t or t == '#':  # 完全匹配
+                        break
+                else:
+                    continue  # 如果没有匹配，则不调回调函数
+
+                if self.on_message:
+                    self.on_message(topic, payload)
+            except nnpy.errors.NNError:
+                break
+
+
+class Req:
+    """ 请求类
+
+    通过该类，可以向Rep（响应）类发起请求，并获取响应
+    """
+
+    def __init__(self, target_port: int, target_ip: str = '127.0.0.1'):
+        self._node = nnpy.Socket(nnpy.AF_SP, nnpy.REQ)
+        self._node.connect(f'tcp://{target_ip}:{target_port}')
+
+
+    def __del__(self):
+        self._node.close()
+
+    
+    def req(self, data):
+        """ 发起请求
+
+        Args:
+            data: 请求体，可以为任意Python内建类型
+        
+        Returns:
+            响应体，为任意Python内建类型
+        """
+        self._node.send(pickle.dumps(data))
+        res = self._node.recv()
+        return pickle.loads(res)
+
+    def close(self):
+        """ 关闭节点 """
+        self._node.close()
+
+
+class Rep:
+    """ 响应类
+
+    通过该类，可以响应Req的请求
+    """
+
+    def __init__(self, port: int, handler):
+        self._handler = handler
+        self._node = nnpy.Socket(nnpy.AF_SP, nnpy.REP)
+        self._node.bind(f'tcp://127.0.0.1:{port}')
+
+
+    def __del__(self):
+        self._node.close()
+
+
+    def _main_thread(self):
+        while True:
+            try:
+                data = self._node.recv()
+                data = pickle.loads(data)
+                res = self._handler(data)
+                self._node.send(pickle.dumps(res))
+            except nnpy.errors.NNError:
+                break
+
+
+    def loop_start(self):
+        """ 开始接收消息，非阻塞式 """
+        threading.Thread(target=self._main_thread).start()
+
+
+    def loop_forever(self):
+        """ 开始接受消息，阻塞式 """
+        self._main_thread()
+
+
+if __name__ == '__main__':
+    b = Bus()
+
+    def on_message(topic, payload):
+        print(topic, payload)
+
+    b.on_message = on_message
+    b.subscribe(['test/#'])
+    b.loop_forever()
+    b.close()

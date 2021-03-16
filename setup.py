@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="omq",  # Replace with your own username
-    version="0.1.2",
+    version="0.2.0",
     author="rty813",
     author_email="zjy523213189zjy@gmail.com",
     description="A package wrap zmq",
@@ -18,6 +18,6 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    install_requires=['pyzmq'],
+    install_requires=['cffi', 'nnpy'],
     python_requires='>=3.6',
 )
