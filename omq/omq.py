@@ -84,7 +84,7 @@ class Bus:
 
                 for t in self._topics:
                     if t.endswith('/#'):  # 通配符匹配
-                        if topic.startswith(t[:-2]) and topic != t:
+                        if topic.startswith(t[:-1]) and topic != t:
                             break
                     elif t in (topic, '#'):  # 完全匹配
                         break
