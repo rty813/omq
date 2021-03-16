@@ -1,6 +1,8 @@
-import nnpy
 import pickle
 import threading
+
+import nnpy
+
 
 class Bus:
     """ 总线类
@@ -10,6 +12,7 @@ class Bus:
     Attributes:
         on_message: 收到消息时的回调函数
     """
+
     def __init__(self, nano: bool = False, base_port: int = 50000):
         self.on_message = None
         self._topics = list()
@@ -31,13 +34,14 @@ class Bus:
             # 连接Nano
             self._node.connect('tcp://192.168.3.112:50000')
 
-
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self._node.close()
 
+    def __del__(self):
+        self._node.close()
 
     def publish(self, topic: str, payload):
         """ 发送一条消息到总线上
@@ -49,7 +53,6 @@ class Bus:
         topic = topic.encode()
         self._node.send(topic + b';' + pickle.dumps(payload))
 
-
     def subscribe(self, topics: list):
         """ 订阅消息主题
 
@@ -58,21 +61,17 @@ class Bus:
         """
         self._topics = topics
 
-
     def close(self):
         """ 关闭节点"""
         self._node.close()
-
 
     def loop_start(self):
         """ 开始接收消息，非阻塞式 """
         threading.Thread(target=self._main_thread).start()
 
-
     def loop_forever(self):
         """ 开始接受消息，阻塞式 """
         self._main_thread()
-
 
     def _main_thread(self):
         while True:
@@ -85,7 +84,7 @@ class Bus:
                     if t.endswith('/#'):  # 通配符匹配
                         if topic.startswith(t[:-2]) and topic != t:
                             break
-                    elif topic == t or t == '#':  # 完全匹配
+                    elif t in (topic, '#'):  # 完全匹配
                         break
                 else:
                     continue  # 如果没有匹配，则不调回调函数
@@ -106,17 +105,21 @@ class Req:
         self._node = nnpy.Socket(nnpy.AF_SP, nnpy.REQ)
         self._node.connect(f'tcp://{target_ip}:{target_port}')
 
-
     def __del__(self):
         self._node.close()
 
-    
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        self._node.close()
+
     def req(self, data):
         """ 发起请求
 
         Args:
             data: 请求体，可以为任意Python内建类型
-        
+
         Returns:
             响应体，为任意Python内建类型
         """
@@ -140,10 +143,14 @@ class Rep:
         self._node = nnpy.Socket(nnpy.AF_SP, nnpy.REP)
         self._node.bind(f'tcp://127.0.0.1:{port}')
 
-
     def __del__(self):
         self._node.close()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        self._node.close()
 
     def _main_thread(self):
         while True:
@@ -155,11 +162,9 @@ class Rep:
             except nnpy.errors.NNError:
                 break
 
-
     def loop_start(self):
         """ 开始接收消息，非阻塞式 """
         threading.Thread(target=self._main_thread).start()
-
 
     def loop_forever(self):
         """ 开始接受消息，阻塞式 """
