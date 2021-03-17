@@ -53,7 +53,7 @@ class Bus:
             payload: 消息内容，可以为任意Python内建类型
         """
         topic = topic.encode()
-        self._node.send(topic + b';' + pickle.dumps(payload))
+        self._node.send(topic + b'^&*;' + pickle.dumps(payload))
 
     def subscribe(self, topics: list):
         """ 订阅消息主题
@@ -78,7 +78,7 @@ class Bus:
     def _main_thread(self):
         while True:
             try:
-                data = self._node.recv().split(b';')
+                data = self._node.recv().split(b'^&*;')
                 topic = data[0].decode()
                 payload = pickle.loads(data[1])
 

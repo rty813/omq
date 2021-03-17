@@ -24,10 +24,6 @@ nanomsg is a socket library that provides several common communication patterns.
 Omq requires python 3.6+
 
 ## Usage
-
-Omq implements Broker and Socket. Before publish and subscribe, you need to start a broker at first.
-
-
 ### Bus
 
 ```python
