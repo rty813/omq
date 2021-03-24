@@ -1,1 +1,1 @@
-from .omq import Bus, Rep, Req
+from .omq import Bus, Rep, Req, SuperNode, SlaveNode

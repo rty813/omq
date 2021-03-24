@@ -71,3 +71,47 @@ with omq.Req(5000) as node:
     res = node.req(data)
     print(res)  # ok
 ```
+
+### Supernode/Slavenode
+```python
+# Supernode.py
+import omq
+
+count = 0
+node = omq.SuperNode()
+
+def on_message(slave_id, payload):
+    global count
+    count += 1
+    if count % 3 == 0:
+        print(f'send: {slave_id}')
+        node.publish(slave_id, 'Recv')
+
+    print(f'recv: {slave_id} - {payload}')
+
+node.on_message = on_message
+node.loop_forever()
+```
+
+```python
+# Slave.py
+import omq
+import time
+
+node = omq.SlaveNode('node1', '127.0.0.1')
+
+def on_message(payload):
+    print('recv: ' + payload)
+
+node.on_message = on_message
+
+node.loop_start()
+
+while True:
+    try:
+        node.publish({'a': time.time(), 'b': 2})
+        time.sleep(1)
+    except:
+        node.close()
+        break
+```

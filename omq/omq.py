@@ -15,7 +15,7 @@ class Bus:
     通过该类，可以将消息发送至总线上，其他所有同一总线的节点都能收到消息，也可以订阅指定消息
 
     Attributes:
-        on_message: 收到消息时的回调函数
+        on_message: 收到消息时的回调函数，参数为topic和payload
     """
 
     def __init__(self, nano: bool = False, base_port: int = 50000):
@@ -26,7 +26,7 @@ class Bus:
         port: int = base_port
         for port in range(base_port, 65535):
             try:
-                self._node.bind(f'tcp://127.0.0.1:{port}')
+                self._node.bind(f'tcp://0.0.0.0:{port}')
                 break
             except nnpy.errors.NNError:
                 # 端口已被占用
@@ -96,6 +96,88 @@ class Bus:
             except nnpy.errors.NNError:
                 break
 
+
+class SuperNode(Bus):
+    """ 中心节点
+
+    该类为中心节点类，被动连接，收发消息。
+
+    Attributes:
+        on_message: 收到消息时的回调函数，参数为slave_id和payload
+    """
+
+    def __init__(self, port: int = 40000) -> None:
+        self.on_message = None
+        self._node = nnpy.Socket(nnpy.AF_SP, nnpy.BUS)
+        self._node.bind(f'tcp://0.0.0.0:{port}')
+
+    def publish(self, slave_id: str, payload):
+        """ 给子节点发消息
+
+        Args:
+            slave_id: 子节点ID
+            payload: 消息内容，可以为任意Python内建类型
+        """
+        topic = ('M2S/' + slave_id).encode()
+        self._node.send(topic + b'^&*;' + pickle.dumps(payload))
+
+    def _main_thread(self):
+        while True:
+            try:
+                data = self._node.recv().split(b'^&*;')
+                topic = data[0].decode()
+                payload = pickle.loads(data[1])
+
+                if not topic.startswith('S2M/'):
+                    continue
+
+                slave_id = topic[4:]  # 去掉开头的"S2M/"
+
+                if self.on_message:
+                    self.on_message(slave_id, payload)
+            except nnpy.errors.NNError:
+                break
+
+
+class SlaveNode(Bus):
+    """ 子节点
+
+    该类为子节点类，可以与中心节点建立一对一通信。需要填写中心节点的ip和port。
+
+    Attributes:
+        on_message: 收到消息时的回调函数，参数为payload
+    """
+
+    def __init__(self, slave_id: str, super_node_ip: str, super_node_port: int = 40000):
+        self.on_message = None
+        self._slave_id = slave_id
+        self._node = nnpy.Socket(nnpy.AF_SP, nnpy.BUS)
+        self._node.connect(f'tcp://{super_node_ip}:{super_node_port}')
+
+    def publish(self, payload):
+        """ 给中心节点发消息
+
+        Args:
+            payload: 消息内容，可以为任意Python内建类型
+        """
+        topic = ('S2M/' + self._slave_id).encode()
+        self._node.send(topic + b'^&*;' + pickle.dumps(payload))
+
+    def _main_thread(self):
+        while True:
+            try:
+                data = self._node.recv().split(b'^&*;')
+                topic = data[0].decode()
+                payload = pickle.loads(data[1])
+
+                if not topic == f'M2S/{self._slave_id}':
+                    continue
+
+                if self.on_message:
+                    self.on_message(payload)
+            except nnpy.errors.NNError:
+                break
+        
 
 class Req:
     """ 请求类
