@@ -17,12 +17,10 @@ class Bus:
 
     通过该类，可以将消息发送至总线上，其他所有同一总线的节点都能收到消息，也可以订阅指定消息
 
-    Attributes:
-        on_message: 收到消息时的回调函数，参数为topic和payload
     """
 
     def __init__(self, nano: bool = False, base_port: int = 50000):
-        self.on_message = None
+        self._on_message = None
         self._topics = list()
 
         self._node = nnpy.Socket(nnpy.AF_SP, nnpy.BUS)
@@ -41,6 +39,15 @@ class Bus:
         if nano is False:
             # 连接Nano
             self._node.connect('tcp://192.168.3.112:50000')
+
+    @property
+    def on_message(self):
+        return self._on_message
+
+    @on_message.setter
+    def on_message(self, func):
+        """ 设置回调函数，接收参数为topic和payload """
+        self._on_message = func
 
     def __enter__(self):
         return self
@@ -98,6 +105,9 @@ class Bus:
                     self.on_message(topic, payload)
             except nnpy.errors.NNError:
                 break
+            except KeyboardInterrupt:
+                self.close()
+                break
 
 
 class SuperNode(Bus):
@@ -109,7 +119,7 @@ class SuperNode(Bus):
         on_message: 收到消息时的回调函数，参数为slave_id和payload
     """
 
-    def __init__(self, port: int = 40000) -> None:
+    def __init__(self, port: int = 40000) -> None:  # pylint: disable=super-init-not-called
         self.on_message = None
         self._node = nnpy.Socket(nnpy.AF_SP, nnpy.BUS)
         self._node.bind(f'tcp://0.0.0.0:{port}')
@@ -151,7 +161,7 @@ class SlaveNode(Bus):
         on_message: 收到消息时的回调函数，参数为payload
     """
 
-    def __init__(self, slave_id: str, super_node_ip: str, super_node_port: int = 40000):
+    def __init__(self, slave_id: str, super_node_ip: str, super_node_port: int = 40000):  # pylint: disable=super-init-not-called
         self.on_message = None
         self._slave_id = slave_id
         self._node = nnpy.Socket(nnpy.AF_SP, nnpy.BUS)
@@ -180,7 +190,7 @@ class SlaveNode(Bus):
                     self.on_message(payload)
             except nnpy.errors.NNError:
                 break
-        
+
 
 class Req:
     """ 请求类
@@ -198,7 +208,7 @@ class Req:
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self._node.close()
 
-    def req(self, data):
+    def req(self, topic, payload):
         """ 发起请求
 
         Args:
@@ -207,7 +217,7 @@ class Req:
         Returns:
             响应体，为任意Python内建类型
         """
-        self._node.send(pickle.dumps(data))
+        self._node.send(topic.encode() + b'^&*;' + pickle.dumps(payload))
         res = self._node.recv()
         return pickle.loads(res)
 
@@ -236,9 +246,11 @@ class Rep:
     def _main_thread(self):
         while True:
             try:
-                data = self._node.recv()
-                data = pickle.loads(data)
-                res = self._handler(data)
+                data = self._node.recv().split(b'^&*;')
+                topic = data[0].decode()
+                payload = pickle.loads(data[1])
+
+                res = self._handler(topic, payload)
                 self._node.send(pickle.dumps(res))
             except nnpy.errors.NNError:
                 break
@@ -250,15 +262,3 @@ class Rep:
     def loop_forever(self):
         """ 开始接受消息，阻塞式 """
         self._main_thread()
-
-
-if __name__ == '__main__':
-    b = Bus()
-
-    def on_message(topic, payload):
-        print(topic, payload)
-
-    b.on_message = on_message
-    b.subscribe(['test/#'])
-    b.loop_forever()
-    b.close()
