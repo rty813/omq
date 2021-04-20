@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="omq",  # Replace with your own username
-    version="0.3.1",
+    version="0.3.2",
     author="rty813",
     author_email="zjy523213189zjy@gmail.com",
     description="A package wrap zmq",

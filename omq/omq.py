@@ -6,6 +6,7 @@ Omq封装了三种使用模式：总线模式、问答模式、主从模式，�
 主从模式适合一对多通信，一个主机和多个从机建立单独的通信。
 使用时，应按需使用不同的模式。
 """
+from typing import Any, List
 import pickle
 import threading
 
@@ -18,8 +19,7 @@ class Bus:
     通过该类，可以将消息发送至总线上，其他所有同一总线的节点都能收到消息，也可以订阅指定消息
 
     """
-
-    def __init__(self, nano: bool = False, base_port: int = 50000):
+    def __init__(self, nano: bool = False, base_port: int = 50000) -> None:
         self._on_message = None
         self._topics = list()
 
@@ -55,7 +55,7 @@ class Bus:
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self._node.close()
 
-    def publish(self, topic: str, payload):
+    def publish(self, topic: str, payload: Any) -> None:
         """ 发送一条消息到总线上
 
         Args:
@@ -65,7 +65,7 @@ class Bus:
         topic = topic.encode()
         self._node.send(topic + b'^&*;' + pickle.dumps(payload))
 
-    def subscribe(self, topics: list):
+    def subscribe(self, topics: List) -> None:
         """ 订阅消息主题
 
         Args:
@@ -73,15 +73,15 @@ class Bus:
         """
         self._topics = topics
 
-    def close(self):
+    def close(self) -> None:
         """ 关闭节点"""
         self._node.close()
 
-    def loop_start(self):
+    def loop_start(self) -> None:
         """ 开始接收消息，非阻塞式 """
         threading.Thread(target=self._main_thread).start()
 
-    def loop_forever(self):
+    def loop_forever(self) -> None:
         """ 开始接受消息，阻塞式 """
         self._main_thread()
 
@@ -118,13 +118,12 @@ class SuperNode(Bus):
     Attributes:
         on_message: 收到消息时的回调函数，参数为slave_id和payload
     """
-
     def __init__(self, port: int = 40000) -> None:  # pylint: disable=super-init-not-called
         self.on_message = None
         self._node = nnpy.Socket(nnpy.AF_SP, nnpy.BUS)
         self._node.bind(f'tcp://0.0.0.0:{port}')
 
-    def publish(self, slave_id: str, payload):
+    def publish(self, slave_id: str, payload: Any) -> None:
         """ 给子节点发消息
 
         Args:
@@ -134,7 +133,7 @@ class SuperNode(Bus):
         topic = ('M2S/' + slave_id).encode()
         self._node.send(topic + b'^&*;' + pickle.dumps(payload))
 
-    def _main_thread(self):
+    def _main_thread(self) -> None:
         while True:
             try:
                 data = self._node.recv().split(b'^&*;')
@@ -160,14 +159,13 @@ class SlaveNode(Bus):
     Attributes:
         on_message: 收到消息时的回调函数，参数为payload
     """
-
-    def __init__(self, slave_id: str, super_node_ip: str, super_node_port: int = 40000):  # pylint: disable=super-init-not-called
+    def __init__(self, slave_id: str, super_node_ip: str, super_node_port: int = 40000) -> None:
         self.on_message = None
         self._slave_id = slave_id
         self._node = nnpy.Socket(nnpy.AF_SP, nnpy.BUS)
         self._node.connect(f'tcp://{super_node_ip}:{super_node_port}')
 
-    def publish(self, payload):
+    def publish(self, payload: Any) -> None:
         """ 给中心节点发消息
 
         Args:
@@ -176,7 +174,7 @@ class SlaveNode(Bus):
         topic = ('S2M/' + self._slave_id).encode()
         self._node.send(topic + b'^&*;' + pickle.dumps(payload))
 
-    def _main_thread(self):
+    def _main_thread(self) -> None:
         while True:
             try:
                 data = self._node.recv().split(b'^&*;')
@@ -197,8 +195,7 @@ class Req:
 
     通过该类，可以向Rep（响应）类发起请求，并获取响应
     """
-
-    def __init__(self, target_port: int, target_ip: str = '127.0.0.1'):
+    def __init__(self, target_port: int, target_ip: str = '127.0.0.1') -> None:
         self._node = nnpy.Socket(nnpy.AF_SP, nnpy.REQ)
         self._node.connect(f'tcp://{target_ip}:{target_port}')
 
@@ -208,20 +205,27 @@ class Req:
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self._node.close()
 
-    def req(self, topic, payload):
+    def req(self, topic: str, payload: Any, timeout: int = -1) -> Any:
         """ 发起请求
 
         Args:
-            data: 请求体，可以为任意Python内建类型
+            topic: 主题
+            payload: 消息
+            timeout: 发送超时时间（毫秒）。默认为-1，也就是阻塞接收
 
         Returns:
             响应体，为任意Python内建类型
         """
+        self._node.setsockopt(nnpy.SOL_SOCKET, nnpy.RCVTIMEO, timeout)
         self._node.send(topic.encode() + b'^&*;' + pickle.dumps(payload))
-        res = self._node.recv()
+        try:
+            res = self._node.recv()
+        except nnpy.errors.NNError:
+            return None
+
         return pickle.loads(res)
 
-    def close(self):
+    def close(self) -> None:
         """ 关闭节点 """
         self._node.close()
 
@@ -231,8 +235,7 @@ class Rep:
 
     通过该类，可以响应Req的请求
     """
-
-    def __init__(self, port: int, handler):
+    def __init__(self, port: int, handler) -> None:
         self._handler = handler
         self._node = nnpy.Socket(nnpy.AF_SP, nnpy.REP)
         self._node.bind(f'tcp://127.0.0.1:{port}')
@@ -243,7 +246,7 @@ class Rep:
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self._node.close()
 
-    def _main_thread(self):
+    def _main_thread(self) -> None:
         while True:
             try:
                 data = self._node.recv().split(b'^&*;')
@@ -255,10 +258,14 @@ class Rep:
             except nnpy.errors.NNError:
                 break
 
-    def loop_start(self):
+    def loop_start(self) -> None:
         """ 开始接收消息，非阻塞式 """
         threading.Thread(target=self._main_thread).start()
 
-    def loop_forever(self):
+    def loop_forever(self) -> None:
         """ 开始接受消息，阻塞式 """
         self._main_thread()
+
+    def close(self) -> None:
+        """ 关闭节点 """
+        self._node.close()
