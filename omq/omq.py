@@ -12,6 +12,8 @@ import threading
 
 import nnpy
 
+from . import Addr
+
 
 class Bus:
     """ 总线类
@@ -190,44 +192,28 @@ class SlaveNode(Bus):
                 break
 
 
-class Req:
-    """ 请求类
+def req(target: Addr, topic: str, payload: Any, timeout: int = 0) -> Any:
+    """ 发起req请求
 
-    通过该类，可以向Rep（响应）类发起请求，并获取响应
+    Args:
+        target: 目标地址
+        topic: 主题
+        payload: 消息
+        timeout: 发送超时时间（毫秒）。默认为0，即非阻塞。若为-1，则将一直等待。
     """
-    def __init__(self, target_port: int, target_ip: str = '127.0.0.1') -> None:
-        self._node = nnpy.Socket(nnpy.AF_SP, nnpy.REQ)
-        self._node.connect(f'tcp://{target_ip}:{target_port}')
 
-    def __enter__(self):
-        return self
+    node = nnpy.Socket(nnpy.AF_SP, nnpy.REQ)
+    node.connect(f'tcp://{target[1]}:{target[0]}')
+    node.setsockopt(nnpy.SOL_SOCKET, nnpy.RCVTIMEO, timeout)
 
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        self._node.close()
+    node.send(topic.encode() + b'^&*;' + pickle.dumps(payload))
+    try:
+        res = node.recv()
+    except nnpy.errors.NNError:
+        res = None
 
-    def req(self, topic: str, payload: Any, timeout: int = -1) -> Any:
-        """ 发起请求
-
-        Args:
-            topic: 主题
-            payload: 消息
-            timeout: 发送超时时间（毫秒）。默认为-1，也就是阻塞接收
-
-        Returns:
-            响应体，为任意Python内建类型
-        """
-        self._node.setsockopt(nnpy.SOL_SOCKET, nnpy.RCVTIMEO, timeout)
-        self._node.send(topic.encode() + b'^&*;' + pickle.dumps(payload))
-        try:
-            res = self._node.recv()
-        except nnpy.errors.NNError:
-            return None
-
-        return pickle.loads(res)
-
-    def close(self) -> None:
-        """ 关闭节点 """
-        self._node.close()
+    node.close()
+    return pickle.loads(res)
 
 
 class Rep:
@@ -238,7 +224,7 @@ class Rep:
     def __init__(self, port: int, handler) -> None:
         self._handler = handler
         self._node = nnpy.Socket(nnpy.AF_SP, nnpy.REP)
-        self._node.bind(f'tcp://127.0.0.1:{port}')
+        self._node.bind(f'tcp://0.0.0.0:{port}')
 
     def __enter__(self):
         return self
