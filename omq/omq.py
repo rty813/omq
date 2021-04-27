@@ -9,8 +9,9 @@ Omq封装了三种使用模式：总线模式、问答模式、主从模式，�
 from typing import Any, List
 import pickle
 import threading
+import traceback
 
-import nnpy
+import pynng
 
 from . import Addr
 
@@ -25,22 +26,22 @@ class Bus:
         self._on_message = None
         self._topics = list()
 
-        self._node = nnpy.Socket(nnpy.AF_SP, nnpy.BUS)
+        self._node = pynng.Bus0()
         port: int = base_port
         for port in range(base_port, 65535):
             try:
-                self._node.bind(f'tcp://0.0.0.0:{port}')
+                self._node.listen(f'tcp://0.0.0.0:{port}')
                 break
-            except nnpy.errors.NNError:
+            except pynng.exceptions.AddressInUse:
                 # 端口已被占用
                 pass
 
         for target_port in range(base_port, port):
-            self._node.connect(f'tcp://127.0.0.1:{target_port}')
+            self._node.dial(f'tcp://127.0.0.1:{target_port}')
 
         if nano is False:
             # 连接Nano
-            self._node.connect('tcp://192.168.3.112:50000')
+            self._node.dial('tcp://192.168.3.112:50000')
 
     @property
     def on_message(self):
@@ -105,10 +106,13 @@ class Bus:
 
                 if self.on_message:
                     self.on_message(topic, payload)
-            except nnpy.errors.NNError:
+            except pynng.exceptions.Closed:
                 break
             except KeyboardInterrupt:
                 self.close()
+                break
+            except:
+                traceback.print_exc()
                 break
 
 
@@ -122,8 +126,8 @@ class SuperNode(Bus):
     """
     def __init__(self, port: int = 40000) -> None:  # pylint: disable=super-init-not-called
         self.on_message = None
-        self._node = nnpy.Socket(nnpy.AF_SP, nnpy.BUS)
-        self._node.bind(f'tcp://0.0.0.0:{port}')
+        self._node = pynng.Bus0()
+        self._node.listen(f'tcp://0.0.0.0:{port}')
 
     def publish(self, slave_id: str, payload: Any) -> None:
         """ 给子节点发消息
@@ -149,8 +153,12 @@ class SuperNode(Bus):
 
                 if self.on_message:
                     self.on_message(slave_id, payload)
-            except nnpy.errors.NNError:
+            except pynng.exceptions.Closed:
                 break
+            except:
+                traceback.print_exc()
+                break
+
 
 
 class SlaveNode(Bus):
@@ -164,8 +172,8 @@ class SlaveNode(Bus):
     def __init__(self, slave_id: str, super_node_ip: str, super_node_port: int = 40000) -> None:
         self.on_message = None
         self._slave_id = slave_id
-        self._node = nnpy.Socket(nnpy.AF_SP, nnpy.BUS)
-        self._node.connect(f'tcp://{super_node_ip}:{super_node_port}')
+        self._node = pynng.Bus0()
+        self._node.dial(f'tcp://{super_node_ip}:{super_node_port}')
 
     def publish(self, payload: Any) -> None:
         """ 给中心节点发消息
@@ -188,7 +196,10 @@ class SlaveNode(Bus):
 
                 if self.on_message:
                     self.on_message(payload)
-            except nnpy.errors.NNError:
+            except pynng.exceptions.Closed:
+                break
+            except:
+                traceback.print_exc()
                 break
 
 
@@ -202,18 +213,17 @@ def req(target: Addr, topic: str, payload: Any, timeout: int = 0) -> Any:
         timeout: 发送超时时间（毫秒）。默认为0，即非阻塞。若为-1，则将一直等待。
     """
 
-    node = nnpy.Socket(nnpy.AF_SP, nnpy.REQ)
-    node.connect(f'tcp://{target[1]}:{target[0]}')
-    node.setsockopt(nnpy.SOL_SOCKET, nnpy.RCVTIMEO, timeout)
+    with pynng.Req0() as node:
+        node.dial(f'tcp://{target[1]}:{target[0]}')
+        node.send(topic.encode() + b'^&*;' + pickle.dumps(payload))
 
-    node.send(topic.encode() + b'^&*;' + pickle.dumps(payload))
-    try:
-        res = node.recv()
-    except nnpy.errors.NNError:
-        res = None
+        node.recv_timeout = timeout
+        try:
+            res = node.recv()
+        except:
+            res = None
 
-    node.close()
-    return pickle.loads(res)
+        return pickle.loads(res)
 
 
 class Rep:
@@ -223,8 +233,8 @@ class Rep:
     """
     def __init__(self, port: int, handler) -> None:
         self._handler = handler
-        self._node = nnpy.Socket(nnpy.AF_SP, nnpy.REP)
-        self._node.bind(f'tcp://0.0.0.0:{port}')
+        self._node = pynng.Rep0()
+        self._node.listen(f'tcp://0.0.0.0:{port}')
 
     def __enter__(self):
         return self
@@ -241,7 +251,10 @@ class Rep:
 
                 res = self._handler(topic, payload)
                 self._node.send(pickle.dumps(res))
-            except nnpy.errors.NNError:
+            except pynng.exceptions.Closed:
+                break
+            except:
+                traceback.print_exc()
                 break
 
     def loop_start(self) -> None:

@@ -3,3 +3,4 @@ pypi_command.sh
 build/
 dist/
 omq.egg-info/
+test*
